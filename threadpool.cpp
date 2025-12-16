@@ -1,7 +1,5 @@
-#include "iostream"
+#include <iostream>
 #include "threadpool.h"
-#include <future>
-#include <queue>
 
 ThreadPool::ThreadPool(size_t n) {
     for (size_t i = 0; i < n; ++i) {
@@ -31,7 +29,7 @@ void ThreadPool::worker() {
                 return stop || !tasks.empty();
             });
             if (stop && tasks.empty()) {
-                return;
+                return; 
             }
 
             job = std::move(tasks.front());
@@ -39,7 +37,7 @@ void ThreadPool::worker() {
         }
 
         try {
-            ActiveGuard guard(active_tasks);
+            ActiveGuard guard(this);
             job();
         } catch (const std::exception& e) {
             std::cerr << "Exception in ThreadPool worker: " << e.what() << std::endl;
@@ -47,4 +45,11 @@ void ThreadPool::worker() {
             std::cerr << "Unknown exception in ThreadPool worker." << std::endl;
         }
     }
+}
+
+void ThreadPool::wait_for_idle() {
+    std::unique_lock<std::mutex> lock(m);
+    cv.wait(lock, [this]() {
+        return tasks.empty() && active_tasks.load(std::memory_order_relaxed) == 0;
+    });
 }

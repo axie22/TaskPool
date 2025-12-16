@@ -11,7 +11,10 @@
 
 #include <type_traits>   
 #include <utility>      
-#include <memory> 
+#include <memory>
+#include <atomic>
+#include <functional>
+#include <iostream>
 
 class ThreadPool {
 public:
@@ -21,9 +24,11 @@ public:
     template <typename F, typename... Args>
     auto submit(F&& f, Args&&... args)
         -> std::future<std::invoke_result_t<F, Args...>>;
+    void wait_for_idle();
 
 private:
     void worker();
+    struct ActiveGuard;
 
     std::vector<std::thread> workers;
     std::queue<std::function<void()>> tasks;
@@ -69,8 +74,13 @@ auto ThreadPool::submit(F&& f, Args&&... args)
     return res;
 }
 
-struct ActiveGuard {
-    std::atomic<size_t>& c;
-    explicit ActiveGuard(std::atomic<size_t>& c_) : c(c_) { c.fetch_add(1, std::memory_order_relaxed); }
-    ~ActiveGuard() { c.fetch_sub(1, std::memory_order_relaxed);}
+struct ThreadPool::ActiveGuard {
+    ThreadPool* pool;
+    explicit ActiveGuard(ThreadPool* p) : pool(p) {
+        pool->active_tasks.fetch_add(1, std::memory_order_relaxed);
+    }
+    ~ActiveGuard() {
+        pool->active_tasks.fetch_sub(1, std::memory_order_relaxed);
+        pool->cv.notify_all();
+    }
 };
