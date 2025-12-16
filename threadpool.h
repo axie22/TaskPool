@@ -31,6 +31,7 @@ private:
     std::mutex m;
     std::condition_variable cv;
     bool stop = false;
+    std::atomic<size_t> active_tasks{0};
 };
 
 // F is type of callable we pass in
@@ -67,3 +68,9 @@ auto ThreadPool::submit(F&& f, Args&&... args)
     cv.notify_one();
     return res;
 }
+
+struct ActiveGuard {
+    std::atomic<size_t>& c;
+    explicit ActiveGuard(std::atomic<size_t>& c_) : c(c_) { c.fetch_add(1, std::memory_order_relaxed); }
+    ~ActiveGuard() { c.fetch_sub(1, std::memory_order_relaxed);}
+};
