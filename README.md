@@ -1,199 +1,83 @@
-# TaskPool
+# ThreadPool
 
-## Overview
+A modern C++ thread pool implementation built from scratch to explore concurrency synchronization, and scheduling fundamentals.
 
-A solid “thread pool + task scheduler” is basically 3 layers:
+## Features
 
-1. **A queue of work** (tasks)
-2. **A set of worker threads** that repeatedly pop work and execute it
-3. **A scheduling API** that lets you submit tasks, get results back, and optionally express dependencies/priorities
+- Fixed-size worker thread pool
+- Generic `submit()` API supporting arbitrary callables and arguments
+- `std::future`-based result retrieval with exception propagation
+- Graceful shutdown with clean worker termination
+- Accurate `wait_for_idle()` to block until all work is completed
+- Instrumentation via an atomic active-task counter
+- Benchmarking harness for scalability experiments
 
-### Task
+### Core Components
 
-A task is “some callable to run later” + metadata:
+- **Task Queue**
+  A `std::queue<std::function<void()>>` holding work items.
 
-- priority
-- affinity (which worker preferred)
-- deadline / delay
-- dependencies (run after X finishes)
+- **Worker Threads**
+  A fixed number of threads that:
 
-In practice you store tasks as something like:
+  1. Wait on a condition variable
+  2. Pop tasks from the queue
+  3. Execute tasks outside the lock
+  4. Track active execution state
 
-- `std::function<void()>` (simple, slower / allocates sometimes)
-- a custom **type-erased** callable (faster, more complex)
-- a “packaged task” that can fulfill a future
+- **Active Task Tracking**
+  An `std::atomic<size_t>` tracks how many tasks are currently executing.
+  This allows the pool to distinguish between:
 
-### Thread pool
+  - no queued work
+  - work currently in progress
 
-- Create `N` threads.
-- Each thread loops:
+- **RAII Guard (`ActiveGuard`)**
+  Ensures `active_tasks` is incremented before task execution and decremented afterward — even if the task throws.
+  Results typically show:
 
-  - wait for work
-  - pop a task
-  - run it
-
-- Shutdown cleanly (stop flag + wake all workers + join).
-
-### Futures / results
-
-When you submit a task that returns `T`, you want `std::future<T>` back:
-
-- Wrap the callable in `std::packaged_task<T()>`
-- Store it as `void()` in the queue by capturing the packaged_task in a lambda
-- Return the future to the caller
+- Near-linear scaling up to available CPU cores
+- Diminishing returns past hardware concurrency
+- Performance degradation with excessive thread counts
 
 ---
 
-## Minimal architecture (good first version)
+## Build Instructions
 
-### Data structures
+### Requirements
 
-- `std::deque<Task>` global queue
-- `std::mutex` + `std::condition_variable`
-- `std::atomic<bool> stop`
+- C++17 compatible compiler (clang++ or g++)
+- POSIX threads
 
-### API surface
+### Build with Make
 
-- `submit(f)` → returns `future<R>`
-- `submit_bulk(range, f)` (optional)
-- `wait_for_idle()` (optional)
-- destructor stops and joins
+```bash
+make
+```
 
-### Worker loop (logic)
+### Run
 
-1. lock
-2. wait until `stop || !queue.empty()`
-3. if `stop && queue.empty()`: exit
-4. pop task
-5. unlock
-6. run task
+```bash
+./main
+```
 
----
+### Clean
 
-## “Scheduler” layer
-
-A thread pool alone runs tasks ASAP. A **scheduler** decides _which_ task runs _when_. Add features one by one:
-
-### Feature A: priorities
-
-Use a `std::priority_queue` instead of deque.
-
-- Each task has `priority` (higher wins).
-- Workers pop highest priority.
-
-Tradeoff: priority_queue is slower than deque but fine.
-
-### Feature B: delayed tasks (timers)
-
-Support `schedule_after(50ms, f)`.
-
-- Keep a min-heap ordered by `run_at` time.
-- Workers check:
-
-  - if ready tasks exist → run them
-  - else wait until next timer fires
-
-This teaches:
-
-- `std::chrono`
-- time-based waiting (`cv.wait_until`)
-
-### Feature C: work stealing (big performance jump)
-
-Instead of one global queue:
-
-- each worker has a **local deque**
-- workers push new tasks into their own deque
-- workers pop from their own deque (fast, no contention)
-- if empty, they **steal** from the back of another worker’s deque
-
-This teaches:
-
-- contention reduction
-- deques + locking strategy
-- scaling behavior
-
-Implementation detail:
-
-- Local deque protected by a small mutex
-- Steal from other worker’s back (common strategy)
-
-### Feature D: dependencies (DAG execution)
-
-Let tasks say “run after these tasks finish”.
-Model:
-
-- each task has an atomic counter `remaining_deps`
-- when a task finishes, it decrements counters of dependents
-- any dependent that hits 0 becomes runnable (enqueue)
-
-This teaches:
-
-- atomic counters
-- graph bookkeeping
-- correctness under concurrency
+```bash
+make clean
+```
 
 ---
 
-## Build plan
+## File Structure
 
-### Milestone 1: Correct basic pool (1–2 days)
-
-- `submit()` returning futures
-- clean shutdown
-- exceptions propagate through futures
-
-Tests:
-
-- run 1000 tasks, verify all futures correct
-- submit tasks that throw, ensure future.get throws
-
-### Milestone 2: wait_for_idle + instrumentation (1 day)
-
-- `active_tasks` atomic counter
-- `wait_for_idle()` waits until queue empty and active==0
-- metrics: tasks executed / steals / average queue length
-
-### Milestone 3: priorities OR timers (1–2 days)
-
-Pick one:
-
-- priorities: easiest scheduler feature
-- timers: most “scheduler-like”
-
-### Milestone 4: work stealing (2–4 days)
-
-- per-worker deque
-- stealing logic
-- benchmark scaling with N threads
-
-### Milestone 5: dependencies (optional, 3–6 days)
-
-- DAG scheduling
-- “when_all” helper that returns a future when a set completes
-
----
-
-## Common pitfalls (the stuff you’ll _actually_ learn from)
-
-- **Shutdown deadlocks**: forgetting to `notify_all()` when stopping
-- **Lost wakeups**: wrong predicate in `cv.wait(lock, pred)`
-- **Tasks capturing references** that dangle (lifetime bugs)
-- **Exception handling**: if a task throws and you don’t contain it, you can crash a worker thread
-- **False sharing**: counters on same cache line cause slowdowns
-- **Priority inversion**: high priority tasks blocked by dependency chain
-
----
-
-## What I’d implement first (simple but “real”)
-
-If you want something portfolio-worthy without going insane:
-
-- Thread pool with `submit() -> future`
-- Per-thread local deques + work stealing
-- Optional priorities (just to demonstrate scheduler control)
-- A tiny benchmark + README explaining design tradeoffs
-
----
-
-If you want, I can sketch a concrete class layout (headers, key methods, and the exact internal state you’ll store) in a way that’s idiomatic modern C++ (C++20-ish) and avoids the usual concurrency footguns.
+```bash
+.
+├── threadpool.h      # ThreadPool interface + template submit()
+├── threadpool.cpp    # Worker loop, shutdown, wait_for_idle
+├── benchmarks.h      # Benchmark declarations
+├── benchmarks.cpp    # Benchmark implementations
+├── main.cpp          # Entry point
+├── Makefile
+└── README.md
+```
