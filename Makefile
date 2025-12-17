@@ -1,18 +1,19 @@
-CXX := clang++ 									# Use clang++ as the C++ compiler
-CXXFLAGS := -std=c++17 -Wall -Wextra -O2		# Compiler flags: C++17 standard, enable all warnings, optimization level 2
+CXX      := clang++
+CXXFLAGS := -std=c++17 -Wall -Wextra -O2 -pthread
 
-TARGET := main									# Name of the output executable
-SOURCES := main.cpp threadpool.cpp				# Source files	
-OBJECTS := $(SOURCES:.cpp=.o)					# Auto generated object files
+TARGET   := main
+SOURCES  := main.cpp threadpool.cpp benchmarks.cpp
+OBJECTS  := $(SOURCES:.cpp=.o)
 
-.PHONY: all clean								# Declare 'all' and 'clean' as phony targets
+.PHONY: all clean
 
-all: $(TARGET)									# Default target to build the executable
-$(TARGET): $(OBJECTS)							# Link object files to create the executable
+all: $(TARGET)
+
+$(TARGET): $(OBJECTS)
 	$(CXX) $(CXXFLAGS) $(OBJECTS) -o $@
 
-%.o: %.cpp threadpool.h							# Compile source files to object files
+%.o: %.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-clean:											# Clean up generated files
+clean:
 	rm -f $(OBJECTS) $(TARGET)
