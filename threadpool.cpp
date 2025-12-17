@@ -1,6 +1,8 @@
 #include <iostream>
 #include "threadpool.h"
 
+thread_local int ThreadPool::worker_id = -1;
+
 ThreadPool::ThreadPool(size_t n) {
     for (size_t i = 0; i < n; ++i) {
         workers.emplace_back(&ThreadPool::worker, this);

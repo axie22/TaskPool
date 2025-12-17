@@ -15,72 +15,91 @@
 #include <atomic>
 #include <functional>
 #include <iostream>
+#include <deque>
 
 class ThreadPool {
-public:
-    explicit ThreadPool(size_t n);
-    ~ThreadPool();
+    public:
+        explicit ThreadPool(size_t n);
+        ~ThreadPool();
 
-    template <typename F, typename... Args>
-    auto submit(F&& f, Args&&... args)
-        -> std::future<std::invoke_result_t<F, Args...>>;
-    void wait_for_idle();
+        template <typename F, typename... Args>
 
-private:
-    void worker();
-    struct ActiveGuard;
+        auto submit(F&& f, Args&&... args)
+            -> std::future<std::invoke_result_t<F, Args...>>;
+        void wait_for_idle();
 
-    std::vector<std::thread> workers;
-    std::queue<std::function<void()>> tasks;
+    private:
+        void worker();
+        struct WorkerState {
+            std::deque<std::function<void()>> local;
+            std::mutex m;
+        };
 
-    std::mutex m;
-    std::condition_variable cv;
-    bool stop = false;
-    std::atomic<size_t> active_tasks{0};
+        struct ActiveGuard {
+            ThreadPool* pool;
+            explicit ActiveGuard(ThreadPool* p) : pool(p) {
+                pool->active_tasks.fetch_add(1, std::memory_order_relaxed);
+            }
+            ~ActiveGuard() {
+                pool->active_tasks.fetch_sub(1, std::memory_order_relaxed);
+                pool->outstanding.fetch_sub(1, std::memory_order_relaxed);
+                pool->cv.notify_all();
+            }
+        };
+
+        std::vector<std::thread> workers;
+        std::vector<WorkerState> worker_states;
+
+        std::deque<std::function<void()>> globalq;
+        std::mutex global_mutex;
+
+        std::mutex state_m;
+        std::condition_variable cv;
+        bool stop = false;
+        
+        std::atomic<size_t> active_tasks{0};
+        std::atomic<size_t> outstanding{0};
+
+        static thread_local int worker_id; // -1 if not a worker thread
+
 };
 
-// F is type of callable we pass in
-// Args.. is a parameter pack
+
 template <typename F, typename... Args>
 
-// auto is the trailing return type used because return type depends on template parameters
-// F&& is a forwarding reference because F is a deduced template type
-// deduces the return type at compile time
 auto ThreadPool::submit(F&& f, Args&&... args) 
     -> std::future<std::invoke_result_t<F, Args...>> 
 {
     using rtype = std::invoke_result_t<F, Args...>;
 
-    // create a packaged_task that wraps the callable and its arguments
     auto task = std::make_shared<std::packaged_task<rtype()>>(
         std::bind(std::forward<F>(f), std::forward<Args>(args)...)
     );
     
-    // get the future associate with the result
-    std::future<rtype> res = task->get_future();
+    auto fut = task->get_future();
 
-    // brackets define scope for the lock
+    // Check stop & increment outstanding
     {
-        std::unique_lock<std::mutex> lock(m);
+        std::lock_guard<std::mutex> lk(state_m);
         if (stop) {
-            throw std::runtime_error("submit on stopped ThreadPool");
+            throw std::runtime_error("Submit on stopped ThreadPool");
         }
+        outstanding.fetch_add(1, std::memory_order_relaxed);
+    }
 
-        tasks.emplace([task]() mutable {
-            (*task)();
-        });
-    } // unlocks mutex here
+    auto wrapper = [task]() { (*task)(); };
+
+    if (worker_id >= 0) {
+        // Submit to local queue
+        WorkerState& w = worker_states[(size_t)worker_id];
+        std::lock_guard<std::mutex> lk(w.m);
+        w.local.push_back(std::move(wrapper));
+    } else {
+        // Submit to global queue
+        std::lock_guard<std::mutex> lk(global_mutex);
+        globalq.push_back(std::move(wrapper));
+    }
     cv.notify_one();
-    return res;
+    return fut;
 }
 
-struct ThreadPool::ActiveGuard {
-    ThreadPool* pool;
-    explicit ActiveGuard(ThreadPool* p) : pool(p) {
-        pool->active_tasks.fetch_add(1, std::memory_order_relaxed);
-    }
-    ~ActiveGuard() {
-        pool->active_tasks.fetch_sub(1, std::memory_order_relaxed);
-        pool->cv.notify_all();
-    }
-};
