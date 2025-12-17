@@ -135,7 +135,7 @@ This teaches:
 
 ---
 
-## Recommended build plan
+## Build plan
 
 ### Milestone 1: Correct basic pool (1–2 days)
 

@@ -62,6 +62,57 @@ void benchmark_p2() {
     assert(counter.load() == N);
 }
 
+void benchmark_p3() {
+    using clock = std::chrono::high_resolution_clock;
+    using namespace std::chrono_literals;
+
+    ThreadPool pool(4);
+
+    for (int i = 0; i < 8; ++i) {
+        pool.submit([] {
+            std::this_thread::sleep_for(200ms);
+        });
+    }
+
+    auto t1 = clock::now();
+    pool.wait_for_idle();
+    auto t2 = clock::now();
+
+    std::chrono::duration<double> s = t2 - t1;
+    std::cout << "wait_for_idle blocked for: " << s.count() << " sec\n";
+}
+
+void benchmark_p4() {
+    using clock = std::chrono::high_resolution_clock;
+
+    const int N = 10;
+
+    for (int threads = 1; threads <= 11; ++threads) {
+        ThreadPool pool(threads);
+
+        std::atomic<uint64_t> sum{0};
+
+        // warmup
+        pool.submit([]{});
+        pool.wait_for_idle();
+
+        auto t1 = clock::now();
+
+        for (int j = 0; j < N; ++j) {
+            pool.submit([j, &sum] {
+                sum.fetch_add(heavy((uint64_t)j), std::memory_order_relaxed);
+            });
+        }
+
+        pool.wait_for_idle(); 
+
+        auto t2 = clock::now();
+        std::chrono::duration<double, std::milli> ms = t2 - t1;
+
+        std::cout << threads << " threads: " << ms.count() << " ms, sum=" << sum.load() << "\n";
+    }
+}
+
 int main() {
     std::cout << "Starting benchmark 1...\n";
     benchmark_p1();
@@ -70,6 +121,15 @@ int main() {
     std::cout << "Starting benchmark 2...\n";
     benchmark_p2();
     std::cout << "Benchmark 2 complete.\n";
+
+    std::cout << "Starting benchmark 3...\n";
+    benchmark_p3();
+    std::cout << "Benchmark 3 complete.\n";
+
+    std::cout << "Starting benchmark 4...\n";
+    benchmark_p4();
+    std::cout << "Benchmark 4 complete.\n";
+
 
     return 0;
 }
