@@ -29,7 +29,7 @@ class ThreadPool {
         void wait_for_idle();
 
     private:
-        void worker();
+        void worker(size_t id);
         struct WorkerState {
             std::deque<std::function<void()>> local;
             std::mutex m;

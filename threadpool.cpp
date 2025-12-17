@@ -3,15 +3,17 @@
 
 thread_local int ThreadPool::worker_id = -1;
 
-ThreadPool::ThreadPool(size_t n) {
+ThreadPool::ThreadPool(size_t n) : worker_states(n) {
+    workers.reserve(n);
     for (size_t i = 0; i < n; ++i) {
-        workers.emplace_back(&ThreadPool::worker, this);
+        workers.emplace_back(&ThreadPool::worker, this, i);
     }
 }
 
 ThreadPool::~ThreadPool() {
+    wait_for_idle();
     {
-        std::unique_lock<std::mutex> lock(m);
+        std::lock_guard<std::mutex> lock(state_m);
         stop = true;
     }
     cv.notify_all();
@@ -22,29 +24,45 @@ ThreadPool::~ThreadPool() {
     }
 }
 
-void ThreadPool::worker() {
+void ThreadPool::worker(size_t id) {
+    worker_id  = (int)id;
     while (true) {
         std::function<void()> job;
+        // Try to get a job from the local queue
         {
-            std::unique_lock<std::mutex> lock(m);
-            cv.wait(lock, [this] { // we need [this] to know what stop and tasks are
-                return stop || !tasks.empty();
-            });
-            if (stop && tasks.empty()) {
-                return; 
+            std::lock_guard<std::mutex> lk(worker_states[id].m);
+            if (!worker_states[id].local.empty()) {
+                job = std::move(worker_states[id].local.front());
+                worker_states[id].local.pop_front();
             }
+        }
 
-            job = std::move(tasks.front());
-            tasks.pop();
+        if (!job) {
+            // Try to get a job from the global queue
+            std::lock_guard<std::mutex> lk(global_mutex);
+            if (!globalq.empty()) {
+                job = std::move(globalq.front());
+                globalq.pop_front();
+            }
+        }
+
+        // if still nothing, wait
+        if (!job) {
+            std::unique_lock<std::mutex> lk(state_m);
+            cv.wait(lk, [this]{
+                return stop || outstanding.load(std::memory_order_relaxed) > 0;
+            });
+            if (stop && outstanding.load(std::memory_order_relaxed) == 0) {
+                return;
+            }
+            continue;
         }
 
         try {
             ActiveGuard guard(this);
             job();
-        } catch (const std::exception& e) {
-            std::cerr << "Exception in ThreadPool worker: " << e.what() << std::endl;
         } catch (...) {
-            std::cerr << "Unknown exception in ThreadPool worker." << std::endl;
+            // error logging
         }
     }
 }
