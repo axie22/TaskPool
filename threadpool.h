@@ -93,7 +93,7 @@ auto ThreadPool::submit(F&& f, Args&&... args)
         // Submit to local queue
         WorkerState& w = worker_states[(size_t)worker_id];
         std::lock_guard<std::mutex> lk(w.m);
-        w.local.push_back(std::move(wrapper));
+        w.local.push_front(std::move(wrapper));
     } else {
         // Submit to global queue
         std::lock_guard<std::mutex> lk(global_mutex);

@@ -68,8 +68,8 @@ void ThreadPool::worker(size_t id) {
 }
 
 void ThreadPool::wait_for_idle() {
-    std::unique_lock<std::mutex> lock(m);
+    std::unique_lock<std::mutex> lock(state_m);
     cv.wait(lock, [this]() {
-        return tasks.empty() && active_tasks.load(std::memory_order_relaxed) == 0;
+        return outstanding.load(std::memory_order_relaxed) == 0;
     });
 }
