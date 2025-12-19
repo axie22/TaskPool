@@ -12,6 +12,7 @@ class benchmarks
 private:
     /* data */
     static uint64_t heavy(uint64_t x);
+    static uint64_t light(uint64_t x);
 public:
     benchmarks();
     ~benchmarks();
@@ -19,4 +20,6 @@ public:
     void benchmark_p2();
     void benchmark_p3();
     void benchmark_p4();
+    void benchmark_p5();
+    void benchmark_p6();
 };

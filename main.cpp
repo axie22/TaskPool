@@ -20,6 +20,12 @@ int main() {
     bm.benchmark_p4();
     std::cout << "Benchmark 4 complete.\n";
 
+    std::cout << "Starting benchmark 5...\n";
+    bm.benchmark_p5();
+    std::cout << "Benchmark 5 complete. \n";
 
+    std::cout << "Startinb benchmark 6...\n";
+    bm.benchmark_p6();
+    std::cout << "Benchmark 6 complete. \n";
     return 0;
 }

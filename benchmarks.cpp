@@ -10,6 +10,14 @@ uint64_t benchmarks::heavy(uint64_t x) {
     return x;
 }
 
+uint64_t benchmarks::light(uint64_t x) {
+    for (int i = 0; i < 50'000; ++i) {
+        x = x * 2862933555777941757ULL + 3037000493ULL;
+    }
+    return x;
+}
+
+
 void benchmarks::benchmark_p1() {
     using clock = std::chrono::high_resolution_clock;
 
@@ -109,4 +117,42 @@ void benchmarks::benchmark_p4() {
 
         std::cout << threads << " threads: " << ms.count() << " ms, sum=" << sum.load() << "\n";
     }
+}
+
+void benchmarks::benchmark_p5() {
+    // Test stealing
+    ThreadPool pool(8);
+    std::atomic<uint64_t> sum{0};
+
+    auto producer = pool.submit([&] {
+        for (int i = 0; i < 2000; ++i) {
+            pool.submit([&, i] {
+                // some real work
+                uint64_t x = i;
+                for (int k = 0; k < 2'000'00; ++k) x = x * 1664525 + 1013904223;
+                sum.fetch_add(x, std::memory_order_relaxed);
+            });
+        }
+    });
+
+    producer.get();
+    pool.wait_for_idle();
+
+    std::cout << "sum=" << sum.load() << "\n";
+    std::cout << "steal_success=" << pool.steal_success << "\n";
+
+}
+
+void benchmarks::benchmark_p6() {
+    ThreadPool pool(8);
+
+    for (int i = 0; i < 200; ++i) {
+    pool.submit([i] {
+        if (i % 10 == 0) heavy(i); 
+        else light(i);
+    });
+    }
+    pool.wait_for_idle();
+
+    std::cout << "steal_success=" << pool.steal_success << "\n";
 }
