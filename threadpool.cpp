@@ -88,15 +88,15 @@ bool ThreadPool::try_steal(size_t thief_id, std::function<void()>& job) {
     for (size_t k = 0; k < attempts; ++k) {
         size_t victim = (thief_id + 1 + k) % n;
         if (victim == thief_id) continue;
-
+        steal_attempts.fetch_add(1, std::memory_order_relaxed);
         std::unique_lock<std::mutex> lk(worker_states[victim].m, std::try_to_lock);
         if (!lk.owns_lock()) continue;
         if (worker_states[victim].local.empty()) continue;
 
         job = std::move(worker_states[victim].local.back());
         worker_states[victim].local.pop_back();
+        steal_success.fetch_add(1, std::memory_order_relaxed);
         return true;
-
     }
     return false;
 }

@@ -29,6 +29,10 @@ class ThreadPool {
             -> std::future<std::invoke_result_t<F, Args...>>;
         void wait_for_idle();
 
+        std::atomic<uint64_t> steal_attempts{0};
+        std::atomic<uint64_t> steal_success{0};
+
+
     private:
         void worker(size_t id);
         bool try_steal(size_t thief_id, std::function<void()>& job);
