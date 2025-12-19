@@ -1,5 +1,6 @@
 CXX      := clang++
 CXXFLAGS := -std=c++17 -Wall -Wextra -O2 -pthread
+# CXXFLAGS := -std=c++17 -Wall -Wextra -O0 -g -pthread -fsanitize=address,undefined
 
 TARGET   := main
 SOURCES  := main.cpp threadpool.cpp benchmarks.cpp

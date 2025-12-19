@@ -46,6 +46,11 @@ void ThreadPool::worker(size_t id) {
             }
         }
 
+        if (!job) {
+            // try to steal
+            try_steal(id, job);
+        }
+
         // if still nothing, wait
         if (!job) {
             std::unique_lock<std::mutex> lk(state_m);
@@ -72,4 +77,26 @@ void ThreadPool::wait_for_idle() {
     cv.wait(lock, [this]() {
         return outstanding.load(std::memory_order_relaxed) == 0;
     });
+}
+
+bool ThreadPool::try_steal(size_t thief_id, std::function<void()>& job) {
+    const size_t n = worker_states.size();
+    if (n <= 1) return false;
+
+    size_t attempts = std::min(n - 1, size_t(4));
+
+    for (size_t k = 0; k < attempts; ++k) {
+        size_t victim = (thief_id + 1 + k) % n;
+        if (victim == thief_id) continue;
+
+        std::unique_lock<std::mutex> lk(worker_states[victim].m, std::try_to_lock);
+        if (!lk.owns_lock()) continue;
+        if (worker_states[victim].local.empty()) continue;
+
+        job = std::move(worker_states[victim].local.back());
+        worker_states[victim].local.pop_back();
+        return true;
+
+    }
+    return false;
 }

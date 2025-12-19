@@ -16,6 +16,7 @@
 #include <functional>
 #include <iostream>
 #include <deque>
+#include <random>
 
 class ThreadPool {
     public:
@@ -30,6 +31,7 @@ class ThreadPool {
 
     private:
         void worker(size_t id);
+        bool try_steal(size_t thief_id, std::function<void()>& job);
         struct WorkerState {
             std::deque<std::function<void()>> local;
             std::mutex m;
